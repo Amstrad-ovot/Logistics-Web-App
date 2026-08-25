@@ -4,6 +4,7 @@ from src.sidebar import render_sidebar
 from main import process_and_upload_excel
 from dashboard import render_dashboard_page
 
+
 sales_db = st.secrets["connections"]["gsheets"]["sales_sheet"]
 
 st.set_page_config(page_title="Logistic Web App", page_icon="🚚", layout="wide")
