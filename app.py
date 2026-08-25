@@ -6,7 +6,7 @@ from dashboard import render_dashboard_page
 
 sales_db = st.secrets["connections"]["gsheets"]["sales_sheet"]
 
-st.set_page_config(page_title="Logistic Web App", page_icon="⚙️", layout="wide")
+st.set_page_config(page_title="Logistic Web App", page_icon="🚚", layout="wide")
 
 # ── 1. Login Gate ─────────────────────────────────────────
 if not render_login_page():
