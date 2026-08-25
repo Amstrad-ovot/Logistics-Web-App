@@ -48,6 +48,114 @@ def logout():
 # CSS Styles
 # ──────────────────────────────────────────────
 
+# LOGIN_CSS = """
+# <style>
+# @import url('https://fonts.googleapis.com/css2?family=Outfit:wght=300;400;600;700&display=swap');
+
+# html, body, [data-testid="stAppViewContainer"] {
+#     background: linear-gradient(135deg, #0d1b2a 0%, #16213e 60%, #1e3a5f 100%) !important;
+#     font-family: 'Outfit', sans-serif;
+# }
+
+# #MainMenu, footer, header { visibility: hidden; }
+
+# .login-title {
+#     color: #ffffff !important;
+#     font-size: 28px;
+#     font-weight: 700;
+#     text-align: center;
+#     letter-spacing: 0.3px;
+#     margin: 0 0 4px 0;
+#     padding: 0;
+# }
+
+# .login-subtitle {
+#     color: #7f9fbf !important;
+#     font-size: 13px;
+#     text-align: center;
+#     letter-spacing: 1.4px;
+#     text-transform: uppercase;
+#     margin: 0 0 16px 0;
+#     padding: 0;
+# }
+
+# [data-testid="stForm"] {
+#     background: rgba(255, 255, 255, 0.04) !important;
+#     border: 1px solid rgba(99, 179, 237, 0.18) !important;
+#     border-radius: 20px !important;
+#     padding: 32px 36px 36px !important;
+#     box-shadow: 0 8px 48px rgba(0, 0, 0, 0.55) !important;
+#     backdrop-filter: blur(12px) !important;
+#     -webkit-backdrop-filter: blur(12px) !important;
+# }
+
+# /* Fix text and password visibility across light/dark themes */
+# [data-testid="stTextInput"] input[type="text"],
+# [data-testid="stTextInput"] input[type="password"] {
+#     background: rgba(255, 255, 255, 0.07) !important;
+#     color: #ffffff !important;
+#     border: 1px solid rgba(99, 179, 237, 0.25) !important;
+#     border-radius: 10px !important;
+#     font-family: 'Outfit', sans-serif !important;
+#     font-size: 16px !important;
+#     padding: 12px 16px !important;
+#     transition: border-color 0.2s ease !important;
+# }
+
+# [data-testid="stTextInput"] input:focus {
+#     border-color: #63b3ed !important;
+#     box-shadow: 0 0 0 3px rgba(99, 179, 237, 0.15) !important;
+# }
+
+# [data-testid="stTextInput"] label {
+#     color: #a0b8d0 !important;
+#     font-size: 14px !important;
+#     font-weight: 600 !important;
+#     letter-spacing: 0.8px !important;
+#     text-transform: uppercase !important;
+# }
+
+# [data-testid="stForm"] .stButton > button {
+#     width: 100% !important;
+#     background: linear-gradient(135deg, #2b6cb0 0%, #2c5282 100%) !important;
+#     color: #ffffff !important;
+#     border: none !important;
+#     border-radius: 10px !important;
+#     padding: 14px 0 !important;
+#     font-size: 16px !important;
+#     font-weight: 600 !important;
+#     font-family: 'Outfit', sans-serif !important;
+#     letter-spacing: 0.5px !important;
+#     cursor: pointer !important;
+#     transition: all 0.2s ease !important;
+#     margin-top: 12px !important;
+# }
+
+# [data-testid="stForm"] .stButton > button:hover {
+#     background: linear-gradient(135deg, #3182ce 0%, #2b6cb0 100%) !important;
+#     box-shadow: 0 4px 20px rgba(49,130,206,0.4) !important;
+#     transform: translateY(-1px) !important;
+# }
+
+# [data-testid="stAlert"] {
+#     border-radius: 10px !important;
+#     font-family: 'Outfit', sans-serif !important;
+# }
+
+# [data-testid="stSpinner"] {
+#     color: #ffffff !important;
+# }
+# [data-testid="stSpinner"] p {
+#     color: #e2e8f0 !important;
+# }
+# </style>
+# """
+
+# ──────────────────────────────────────────────
+# CSS Styles
+# ──────────────────────────────────────────────
+
+
 LOGIN_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght=300;400;600;700&display=swap');
@@ -89,16 +197,16 @@ html, body, [data-testid="stAppViewContainer"] {
     -webkit-backdrop-filter: blur(12px) !important;
 }
 
-/* Fix text and password visibility across light/dark themes */
+/* FIX: Targets both text AND password input elements universally, 
+   removing hardcoded text colors to allow dynamic system theme matching */
 [data-testid="stTextInput"] input[type="text"],
 [data-testid="stTextInput"] input[type="password"] {
     background: rgba(255, 255, 255, 0.07) !important;
-    color: #ffffff !important;
     border: 1px solid rgba(99, 179, 237, 0.25) !important;
     border-radius: 10px !important;
     font-family: 'Outfit', sans-serif !important;
-    font-size: 16px !important;
-    padding: 12px 16px !important;
+    font-size: 17px !important;
+    padding: 14px 16px !important;
     transition: border-color 0.2s ease !important;
 }
 
@@ -109,7 +217,7 @@ html, body, [data-testid="stAppViewContainer"] {
 
 [data-testid="stTextInput"] label {
     color: #a0b8d0 !important;
-    font-size: 14px !important;
+    font-size: 15px !important;
     font-weight: 600 !important;
     letter-spacing: 0.8px !important;
     text-transform: uppercase !important;
@@ -121,14 +229,14 @@ html, body, [data-testid="stAppViewContainer"] {
     color: #ffffff !important;
     border: none !important;
     border-radius: 10px !important;
-    padding: 14px 0 !important;
-    font-size: 16px !important;
+    padding: 15px 0 !important;
+    font-size: 18px !important;
     font-weight: 600 !important;
     font-family: 'Outfit', sans-serif !important;
     letter-spacing: 0.5px !important;
     cursor: pointer !important;
     transition: all 0.2s ease !important;
-    margin-top: 12px !important;
+    margin-top: 8px !important;
 }
 
 [data-testid="stForm"] .stButton > button:hover {
@@ -150,7 +258,6 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 </style>
 """
-
 
 # ──────────────────────────────────────────────
 # Render
