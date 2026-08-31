@@ -505,6 +505,13 @@ def render_dashboard_page(sales_db: str):
             required=False,
             disabled=False,
         ),
+        "transporter_name" : st.column_config.SelectboxColumn(
+            "Transporter Name",
+            # options= ["AAGCN3086J-  NEETA LOGISTICS INDIA PVT LTD- TR","AAECS4363H-SAFEXPRESS PVT LTD"],
+            options = st.secrets["connections"]["gsheets"]["transporter_list"],
+            required= False,
+            disabled=False
+        ),
         "approx_distance": st.column_config.NumberColumn(
             "Approx Distance", format="%d", disabled=False
         ),
@@ -589,6 +596,9 @@ def render_dashboard_page(sales_db: str):
 
 
 
+
+
+
 # import io
 # import time
 # import threading
@@ -602,7 +612,7 @@ def render_dashboard_page(sales_db: str):
 
 # DEFAULT_COLUMNS = [
 #     "id", "location_name", "invoice_type_desc", "invoice_doc_date", "tax_invoice_no",
-#     "customer_name", "place_of_supply", "fg_qty", "selling_fc_value", "igst",
+#     "customer_name","cust_city_name", "place_of_supply", "fg_qty", "selling_fc_value", "igst",
 #     "cgst", "sgst", "invoiced_value_fc", "vehicle_no", "eway_bill_no", "transporter_name", "challan_no",
 #     "vehicle_type", "approx_distance", "provisional_freight_amount",
 #     "provisional_perc", "actual_freight_amount", "actual_perc", "lr_charges", "loading_charges",
@@ -840,6 +850,7 @@ def render_dashboard_page(sales_db: str):
 #     st.markdown("### 🔍 Filter Records")
 #     col_loc = next((c for c in df_work.columns if c.strip().lower() == "location_name"), None)
 #     col_pos = next((c for c in df_work.columns if c.strip().lower() == "place_of_supply"), None)
+#     col_city = next((c for c in df_work.columns if c.strip().lower() == "cust_city_name"), None)
 #     col_trans = next((c for c in df_work.columns if c.strip().lower() == "transporter_name"), None)
 #     col_date = next((c for c in df_work.columns if c.strip().lower() == "invoice_doc_date"), None)
 
@@ -849,7 +860,7 @@ def render_dashboard_page(sales_db: str):
 #         if temp_df["parsed_invoice_date"].isna().all():
 #             temp_df["parsed_invoice_date"] = pd.to_datetime(temp_df[col_date], errors="coerce")
 
-#     f1, f2, f3 = st.columns(3)
+#     f1, f2, f3, f4 = st.columns(4)
 #     with f1:
 #         loc_opts = sorted(temp_df[col_loc].dropna().astype(str).unique()) if col_loc else []
 #         selected_locations = st.multiselect("Location Name", options=loc_opts)
@@ -859,6 +870,9 @@ def render_dashboard_page(sales_db: str):
 #     with f3:
 #         trans_opts = sorted(temp_df[col_trans].dropna().astype(str).unique()) if col_trans else []
 #         selected_transporters = st.multiselect("Transporter Name", options=trans_opts)
+#     with f4:
+#         city_opts = sorted(temp_df[col_city].dropna().astype(str).unique()) if col_city else []
+#         selected_city = st.multiselect("Cust City Name", options = city_opts)
 
 #     d1, d2, d3 = st.columns([2, 2, 1])
 #     with d1:
@@ -882,6 +896,8 @@ def render_dashboard_page(sales_db: str):
 #         filtered_df = filtered_df[filtered_df[col_pos].astype(str).isin(selected_pos)]
 #     if col_trans and selected_transporters:
 #         filtered_df = filtered_df[filtered_df[col_trans].astype(str).isin(selected_transporters)]
+#     if col_city and selected_city:
+#         filtered_df = filtered_df[filtered_df[col_city].astype(str).isin(selected_city)]
 #     if col_date and "parsed_invoice_date" in filtered_df:
 #         if from_date:
 #             filtered_df = filtered_df[filtered_df["parsed_invoice_date"].dt.date >= from_date]
@@ -952,9 +968,15 @@ def render_dashboard_page(sales_db: str):
 
 #                 if blocked_cols:
 #                     st.toast(
-#                         f"⚠️ **ID #{record_id}**: Enter **Bill No** first before adding charges: {', '.join(blocked_cols)}.", 
-#                         icon="🚫"
+#                         f"Enter **Bill No** first before adding {', '.join(blocked_cols)} across the ID {record_id}.", 
+#                         icon="🚫",
+#                         duration = "long"
 #                     )
+#                     # st.toast(
+#                     #     f"⚠️ **ID #{record_id}**: Enter **Bill No** first before adding charges: {', '.join(blocked_cols)}.", 
+#                     #     icon="🚫",
+#                     #     duration = "long"
+#                     # )
 
 #                 if valid_changes:
 #                     if record_id not in st.session_state.pending_edits:
@@ -1165,3 +1187,5 @@ def render_dashboard_page(sales_db: str):
 #                 st.session_state.pop("working_df", None)
 #                 time.sleep(1)
 #                 st.rerun()
+
+
