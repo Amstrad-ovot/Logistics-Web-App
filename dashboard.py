@@ -1,3 +1,4 @@
+import re
 import io
 import time
 import threading
@@ -127,7 +128,35 @@ def update_gsheet_atomic(sheet_name: str, id_col: str, pending_edits: dict, requ
             return False
 
         
-# ── Helper: Filter Data by User Location ─────────────────
+# # ── Helper: Filter Data by User Location ─────────────────
+# def filter_by_user_location(df: pd.DataFrame) -> pd.DataFrame:
+#     if df.empty:
+#         return df
+
+#     user_role = str(st.session_state.get("user_role", "")).strip().lower()
+#     if user_role in ("admin", "super admin", "superadmin"):
+#         return df
+
+#     raw_locations = st.session_state.get("user_regions") or st.session_state.get("user_locations") or st.session_state.get("location", "")
+#     if not raw_locations:
+#         st.warning("⚠️ No assigned location found in session state.")
+#         return pd.DataFrame(columns=df.columns)
+
+#     allowed_locations = set()
+#     if isinstance(raw_locations, str):
+#         allowed_locations = {loc.strip().lower() for loc in raw_locations.split(",") if loc.strip()}
+#     elif isinstance(raw_locations, (list, tuple, set)):
+#         allowed_locations = {str(loc).strip().lower() for loc in raw_locations if str(loc).strip()}
+
+#     loc_col = next((c for c in df.columns if c.strip().lower() == "location_name"), None)
+#     if loc_col and allowed_locations:
+#         clean_col = df[loc_col].astype(str).str.strip().str.lower()
+#         return df[clean_col.isin(allowed_locations)]
+
+#     st.error("⚠️ Column 'location_name' was not found in dataset.")
+#     return pd.DataFrame(columns=df.columns)
+
+
 def filter_by_user_location(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
@@ -149,12 +178,18 @@ def filter_by_user_location(df: pd.DataFrame) -> pd.DataFrame:
 
     loc_col = next((c for c in df.columns if c.strip().lower() == "location_name"), None)
     if loc_col and allowed_locations:
-        clean_col = df[loc_col].astype(str).str.strip().str.lower()
-        return df[clean_col.isin(allowed_locations)]
+        # Escape special regex characters in locations for safety
+        escaped_locations = [re.escape(loc) for loc in allowed_locations]
+        
+        # Combine locations into a single regex pattern (e.g., "raipur|lucknow")
+        pattern = "|".join(escaped_locations)
+        
+        # Use str.contains with case=False and regex=True
+        mask = df[loc_col].astype(str).str.contains(pattern, case=False, na=False)
+        return df[mask]
 
     st.error("⚠️ Column 'location_name' was not found in dataset.")
     return pd.DataFrame(columns=df.columns)
-
 
 # ── Helper: Calculate Freight Percentages & Totals ───────────────
 def calculate_freight_percentages(df: pd.DataFrame) -> pd.DataFrame:
@@ -244,57 +279,6 @@ def render_dashboard_page(sales_db: str):
 
     df_work = st.session_state.working_df
     col_id = next((c for c in df_work.columns if c.strip().lower() == "id"), "id")
-
-    # Filters Section
-    # st.markdown("### 🔍 Filter Records")
-    # col_loc = next((c for c in df_work.columns if c.strip().lower() == "location_name"), None)
-    # col_pos = next((c for c in df_work.columns if c.strip().lower() == "place_of_supply"), None)
-    # col_city = next((c for c in df_work.columns if c.strip().lower() == "cust_city_name"), None)
-    # col_trans = next((c for c in df_work.columns if c.strip().lower() == "transporter_name"), None)
-    # col_date = next((c for c in df_work.columns if c.strip().lower() == "invoice_doc_date"), None)
-    # col_invoice = next((c for c in df_work.columns if c.strip().lower() == "tax_invoice_no"), None)
-
-    # temp_df = df_work.copy()
-    # if col_date:
-    #     temp_df["parsed_invoice_date"] = pd.to_datetime(temp_df[col_date], format="%d/%m/%Y", errors="coerce")
-    #     if temp_df["parsed_invoice_date"].isna().all():
-    #         temp_df["parsed_invoice_date"] = pd.to_datetime(temp_df[col_date], errors="coerce")
-
-    # f1, f2, f3, f4 = st.columns(4)
-    # with f1:
-    #     loc_opts = sorted(temp_df[col_loc].dropna().astype(str).unique()) if col_loc else []
-    #     selected_locations = st.multiselect("Location Name", options=loc_opts)
-    # with f2:
-    #     pos_opts = sorted(temp_df[col_pos].dropna().astype(str).unique()) if col_pos else []
-    #     selected_pos = st.multiselect("Place of Supply", options=pos_opts)
-    # with f3:
-    #     trans_opts = sorted(temp_df[col_trans].dropna().astype(str).unique()) if col_trans else []
-    #     selected_transporters = st.multiselect("Transporter Name", options=trans_opts)
-    # with f4:
-    #     city_opts = sorted(temp_df[col_city].dropna().astype(str).unique()) if col_city else []
-    #     selected_city = st.multiselect("Cust City Name", options = city_opts)
-
-    # # d1, d2, d3 = st.columns([2, 2, 1])
-    # d1, d2, d3, d4 = st.columns(4)
-    # with d1:
-    #     from_date = st.date_input("From Date", value=None)
-    # with d2:
-    #     to_date = st.date_input("To Date", value=None)
-    # with d3:
-    #     invoice_opts = temp_df[col_invoice].dropna().astype(str).unique() if col_invoice else []
-    #     selected_invoice = st.multiselect("Tax Invoice No.", options = invoice_opts)
-    # with d4:
-    #     st.write("")
-    #     st.write("")
-    #     if st.button("🔄 Refresh Data", width="stretch", type="secondary"):
-    #         st.session_state.pop("working_df", None)
-    #         st.session_state.pop("pending_edits", None)
-    #         st.cache_data.clear()
-    #         st.session_state.last_auto_refresh = time.time()
-    #         st.rerun()
-
-    # filtered_df = temp_df.copy()
-
 
     # ── Filters Section (Cascading / Dynamic Dependent Options) ──────────────
     st.markdown("### 🔍 Filter Records")
