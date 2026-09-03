@@ -82,70 +82,178 @@ def process_and_upload_excel(uploaded_file, target_sheet_name: str, custom_sheet
 
         # Standardize column names
         df.columns = [
-            str(col).strip().lower().replace(" ", "_").replace(".", "").replace("(", "").replace(")", "")
+            str(col)
+            .strip()
+            .lower()
+            .replace(" ", "_")
+            .replace(".", "")
+            .replace("(", "")
+            .replace(")", "")
             for col in df.columns
         ]
 
         selected_columns = [
-            "location_name", "invoice_type_desc", "invoice_doc_date", "tax_invoice_no",
-            "customer_name", "place_of_supply", "fg_qty", "selling_fc_value",
-            "igst", "cgst", "sgst", "invoiced_value_fc", "transporter_name",
-            "challan_no", "vehicle_no", "vehicle_type", "approx_distance", "eway_bill_no"
+            "location_name",
+            "invoice_type_desc",
+            "invoice_doc_date",
+            "tax_invoice_no",
+            "customer_name",
+            "place_of_supply",
+            "fg_qty",
+            "selling_fc_value",
+            "igst",
+            "cgst",
+            "sgst",
+            "invoiced_value_fc",
+            "transporter_name",
+            "challan_no",
+            "vehicle_no",
+            "vehicle_type",
+            "approx_distance",
+            "eway_bill_no",
         ]
 
         # Ensure all selected columns exist in incoming dataframe
         for col in selected_columns:
             if col not in df.columns:
                 if col == "invoice_doc_date":
-                    show_popup("Excel file missing required column: 'invoice_doc_date'", type="error")
+                    show_popup(
+                        "Excel file missing required column: 'invoice_doc_date'",
+                        type="error",
+                    )
                     return False
                 df[col] = ""
 
         # ── EXCLUDE SUMMARY / COUNT ROWS ─────────────────────────────────────
         first_col = df.columns[0]
-        count_mask = df[first_col].astype(str).str.lower().str.contains("count", na=False)
+        count_mask = (
+            df[first_col].astype(str).str.lower().str.contains("count", na=False)
+        )
         df = df[~count_mask]
 
         # Convert dates and drop invalid/empty date rows
-        parsed_dates = pd.to_datetime(df["invoice_doc_date"], format="%d/%m/%Y", errors="coerce")
+        parsed_dates = pd.to_datetime(
+            df["invoice_doc_date"], format="%d/%m/%Y", errors="coerce"
+        )
 
         if parsed_dates.isna().all():
-            parsed_dates = pd.to_datetime(df["invoice_doc_date"], errors="coerce")
+            parsed_dates = pd.to_datetime(
+                df["invoice_doc_date"], errors="coerce"
+            )
 
         valid_date_mask = parsed_dates.notna()
         df = df[valid_date_mask].copy()
-        parsed_dates = parsed_dates[valid_date_mask]
 
         if df.empty:
-            show_popup("No valid transaction rows found after dropping count/summary rows.", type="error")
+            show_popup(
+                "No valid transaction rows found after dropping count/summary rows.",
+                type="error",
+            )
             return False
 
-        # Filter to selected target columns
+        # Filter to selected target columns & format tax_invoice_no
         df = df[selected_columns]
-        df["location_name"] = df["location_name"].astype(str).str.strip()
+        df["tax_invoice_no"] = df["tax_invoice_no"].astype(str).str.strip()
+
+        # ── GROUPBY AGGREGATION ──────────────────────────────────────────────
+        numeric_cols = [
+            "fg_qty",
+            "selling_fc_value",
+            "igst",
+            "cgst",
+            "sgst",
+            "invoiced_value_fc",
+        ]
+        string_cols = [
+            "location_name",
+            "invoice_type_desc",
+            "invoice_doc_date",
+            "customer_name",
+            "place_of_supply",
+            "transporter_name",
+            "challan_no",
+            "vehicle_no",
+            "vehicle_type",
+            "approx_distance",
+            "eway_bill_no",
+        ]
+
+        # Ensure numeric columns are coerced properly before summing
+        for col in numeric_cols:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+        # Helper function to join distinct non-null string values with comma
+        def unique_join(series):
+            unique_vals = [
+                str(v).strip()
+                for v in series.dropna().unique()
+                if str(v).strip() != ""
+            ]
+            return ", ".join(unique_vals)
+
+        # Build aggregation mapping
+        agg_dict = {col: "sum" for col in numeric_cols}
+        agg_dict.update({col: unique_join for col in string_cols})
+
+        # Apply GroupBy on tax_invoice_no
+        df = df.groupby("tax_invoice_no", as_index=False).agg(agg_dict)
+
+        # Re-parse invoice_doc_date post aggregation (take the first date if multiple exist)
+        df["invoice_doc_date"] = df["invoice_doc_date"].apply(
+            lambda x: x.split(",")[0].strip() if x else ""
+        )
+        parsed_dates = pd.to_datetime(
+            df["invoice_doc_date"], format="%d/%m/%Y", errors="coerce"
+        )
+        if parsed_dates.isna().all():
+            parsed_dates = pd.to_datetime(
+                df["invoice_doc_date"], errors="coerce"
+            )
 
         # ── MAP CUST_CITY_NAME FROM CUSTOMIZED SHEET ────────────────────────
         spreadsheet = connect_gsheet()
-        
+
         try:
             custom_ws = spreadsheet.worksheet(custom_sheet)
             custom_records = custom_ws.get_all_records()
-            
+
             if custom_records:
                 custom_df = pd.DataFrame(custom_records)
-                custom_df.columns = [str(c).strip().lower() for c in custom_df.columns]
-                
-                if "commercial_invoice_no" in custom_df.columns and "cust_city_name" in custom_df.columns:
-                    custom_df["commercial_invoice_no"] = custom_df["commercial_invoice_no"].astype(str).str.strip().str.upper()
-                    df["tax_invoice_lookup"] = df["tax_invoice_no"].astype(str).str.strip().str.upper()
-                    
-                    city_map_df = (
-                        custom_df[custom_df["cust_city_name"].astype(str).str.strip() != ""]
-                        .drop_duplicates(subset=["commercial_invoice_no"])
+                custom_df.columns = [
+                    str(c).strip().lower() for c in custom_df.columns
+                ]
+
+                if (
+                    "commercial_invoice_no" in custom_df.columns
+                    and "cust_city_name" in custom_df.columns
+                ):
+                    custom_df["commercial_invoice_no"] = (
+                        custom_df["commercial_invoice_no"]
+                        .astype(str)
+                        .str.strip()
+                        .str.upper()
                     )
-                    city_map = dict(zip(city_map_df["commercial_invoice_no"], city_map_df["cust_city_name"]))
-                    
-                    df["cust_city_name"] = df["tax_invoice_lookup"].map(city_map).fillna("")
+                    df["tax_invoice_lookup"] = (
+                        df["tax_invoice_no"]
+                        .astype(str)
+                        .str.strip()
+                        .str.upper()
+                    )
+
+                    city_map_df = custom_df[
+                        custom_df["cust_city_name"].astype(str).str.strip()
+                        != ""
+                    ].drop_duplicates(subset=["commercial_invoice_no"])
+                    city_map = dict(
+                        zip(
+                            city_map_df["commercial_invoice_no"],
+                            city_map_df["cust_city_name"],
+                        )
+                    )
+
+                    df["cust_city_name"] = (
+                        df["tax_invoice_lookup"].map(city_map).fillna("")
+                    )
                     df.drop(columns=["tax_invoice_lookup"], inplace=True)
                 else:
                     df["cust_city_name"] = ""
@@ -165,28 +273,30 @@ def process_and_upload_excel(uploaded_file, target_sheet_name: str, custom_sheet
             worksheet = spreadsheet.worksheet(target_sheet_name)
             all_rows = worksheet.get_all_values()
         except gspread.exceptions.WorksheetNotFound:
-            worksheet = spreadsheet.add_worksheet(title=target_sheet_name, rows=1000, cols=len(df.columns) + 2)
+            worksheet = spreadsheet.add_worksheet(
+                title=target_sheet_name, rows=1000, cols=len(df.columns) + 2
+            )
             all_rows = []
 
         existing_invoices = set()
 
         if len(all_rows) > 1:
-            # First row contains headers
             headers_lower = [str(h).strip().lower() for h in all_rows[0]]
             if "tax_invoice_no" in headers_lower:
                 tax_inv_col_idx = headers_lower.index("tax_invoice_no")
-                # Extract all existing invoice numbers from database
                 existing_invoices = {
                     str(row[tax_inv_col_idx]).strip().upper()
                     for row in all_rows[1:]
-                    if len(row) > tax_inv_col_idx and str(row[tax_inv_col_idx]).strip()
+                    if len(row) > tax_inv_col_idx
+                    and str(row[tax_inv_col_idx]).strip()
                 }
 
         # ── Filter out duplicate tax_invoice_no rows ──────────────────────────
-        df["_invoice_check"] = df["tax_invoice_no"].astype(str).str.strip().str.upper()
+        df["_invoice_check"] = (
+            df["tax_invoice_no"].astype(str).str.strip().str.upper()
+        )
         initial_count = len(df)
-        
-        # Keep only rows whose tax_invoice_no is NOT in existing_invoices
+
         df = df[~df["_invoice_check"].isin(existing_invoices)].copy()
         df.drop(columns=["_invoice_check"], inplace=True)
 
@@ -208,15 +318,18 @@ def process_and_upload_excel(uploaded_file, target_sheet_name: str, custom_sheet
         else:
             headers = df.columns.tolist()
             worksheet.clear()
-            worksheet.update([headers] + new_rows, value_input_option="USER_ENTERED")
+            worksheet.update(
+                [headers] + new_rows, value_input_option="USER_ENTERED"
+            )
 
-        # Clear cached DataFrames to show updated database immediately
         st.cache_data.clear()
 
         uploaded_months = df["month"].dropna().unique().tolist()
         success_msg = f"Successfully appended {len(df)} new record(s) for month(s): {', '.join(uploaded_months)}!"
         if skipped_count > 0:
-            success_msg += f" (Skipped {skipped_count} existing duplicate invoice(s))."
+            success_msg += (
+                f" (Skipped {skipped_count} existing duplicate invoice(s))."
+            )
 
         show_popup(success_msg, type="success")
         st.success(success_msg)
@@ -226,6 +339,7 @@ def process_and_upload_excel(uploaded_file, target_sheet_name: str, custom_sheet
         show_popup(f"Error processing file upload: {str(e)}", type="error")
         print(f"Upload Error: {e}")
         return False
+
 
 
 # def process_and_upload_excel(uploaded_file, target_sheet_name: str, custom_sheet: str):
@@ -246,7 +360,7 @@ def process_and_upload_excel(uploaded_file, target_sheet_name: str, custom_sheet
 #             "challan_no", "vehicle_no", "vehicle_type", "approx_distance", "eway_bill_no"
 #         ]
 
-#         # Ensure all selected columns exist in incoming dataframe (fill missing with empty strings)
+#         # Ensure all selected columns exist in incoming dataframe
 #         for col in selected_columns:
 #             if col not in df.columns:
 #                 if col == "invoice_doc_date":
@@ -259,7 +373,7 @@ def process_and_upload_excel(uploaded_file, target_sheet_name: str, custom_sheet
 #         count_mask = df[first_col].astype(str).str.lower().str.contains("count", na=False)
 #         df = df[~count_mask]
 
-#         # Convert dates and drop invalid/empty date rows (e.g., summary totals)
+#         # Convert dates and drop invalid/empty date rows
 #         parsed_dates = pd.to_datetime(df["invoice_doc_date"], format="%d/%m/%Y", errors="coerce")
 
 #         if parsed_dates.isna().all():
@@ -286,22 +400,18 @@ def process_and_upload_excel(uploaded_file, target_sheet_name: str, custom_sheet
             
 #             if custom_records:
 #                 custom_df = pd.DataFrame(custom_records)
-#                 # Standardize column names for safe merging
 #                 custom_df.columns = [str(c).strip().lower() for c in custom_df.columns]
                 
 #                 if "commercial_invoice_no" in custom_df.columns and "cust_city_name" in custom_df.columns:
-#                     # Clean lookup values
 #                     custom_df["commercial_invoice_no"] = custom_df["commercial_invoice_no"].astype(str).str.strip().str.upper()
 #                     df["tax_invoice_lookup"] = df["tax_invoice_no"].astype(str).str.strip().str.upper()
                     
-#                     # Keep deduplicated map (first non-empty city per invoice)
 #                     city_map_df = (
 #                         custom_df[custom_df["cust_city_name"].astype(str).str.strip() != ""]
 #                         .drop_duplicates(subset=["commercial_invoice_no"])
 #                     )
 #                     city_map = dict(zip(city_map_df["commercial_invoice_no"], city_map_df["cust_city_name"]))
                     
-#                     # Map to cust_city_name column
 #                     df["cust_city_name"] = df["tax_invoice_lookup"].map(city_map).fillna("")
 #                     df.drop(columns=["tax_invoice_lookup"], inplace=True)
 #                 else:
@@ -312,49 +422,79 @@ def process_and_upload_excel(uploaded_file, target_sheet_name: str, custom_sheet
 #             print(f"Warning: Could not fetch city map from '{custom_sheet}': {e}")
 #             df["cust_city_name"] = ""
 
-#         # ── 2. Add Unique ID, Processed Month, and Date Strings ──────────────
-#         # Insert unique ID as the first column
+#         # ── 2. Add Unique ID, Processed Month, and Formatting ────────────────
 #         df.insert(0, "id", [uuid.uuid4().hex for _ in range(len(df))])
-
 #         df["month"] = parsed_dates.dt.strftime("%b-%y")
 #         df["invoice_doc_date"] = parsed_dates.dt.strftime("%d/%m/%Y")
-        
-#         # Replace NaN / NaT values for JSON safety
-#         df = df.replace({np.nan: None})
 
-#         # ── 3. Target Worksheet Setup ────────────────────────────────────────
+#         # ── 3. Target Worksheet Setup & Deduplication Check ──────────────────
 #         try:
 #             worksheet = spreadsheet.worksheet(target_sheet_name)
-#             existing_data = worksheet.get_all_records()
+#             all_rows = worksheet.get_all_values()
 #         except gspread.exceptions.WorksheetNotFound:
-#             # Create sheet automatically if missing
 #             worksheet = spreadsheet.add_worksheet(title=target_sheet_name, rows=1000, cols=len(df.columns) + 2)
-#             existing_data = []
+#             all_rows = []
 
-#         # Convert new dataframe rows to list format
+#         existing_invoices = set()
+
+#         if len(all_rows) > 1:
+#             # First row contains headers
+#             headers_lower = [str(h).strip().lower() for h in all_rows[0]]
+#             if "tax_invoice_no" in headers_lower:
+#                 tax_inv_col_idx = headers_lower.index("tax_invoice_no")
+#                 # Extract all existing invoice numbers from database
+#                 existing_invoices = {
+#                     str(row[tax_inv_col_idx]).strip().upper()
+#                     for row in all_rows[1:]
+#                     if len(row) > tax_inv_col_idx and str(row[tax_inv_col_idx]).strip()
+#                 }
+
+#         # ── Filter out duplicate tax_invoice_no rows ──────────────────────────
+#         df["_invoice_check"] = df["tax_invoice_no"].astype(str).str.strip().str.upper()
+#         initial_count = len(df)
+        
+#         # Keep only rows whose tax_invoice_no is NOT in existing_invoices
+#         df = df[~df["_invoice_check"].isin(existing_invoices)].copy()
+#         df.drop(columns=["_invoice_check"], inplace=True)
+
+#         skipped_count = initial_count - len(df)
+
+#         if df.empty:
+#             msg = f"All {skipped_count} record(s) in this file already exist in '{target_sheet_name}'. No new records added."
+#             show_popup(msg, type="warning")
+#             st.warning(msg)
+#             return True
+
+#         # Clean NaN/NaT values for JSON compatibility
+#         df = df.replace({np.nan: None})
 #         new_rows = df.where(df.notnull(), "").values.tolist()
 
-#         # ── 4. Direct Append Logic ───────────────────────────────────────────
-#         if existing_data:
-#             # Sheet already has headers/data -> simply append new rows
+#         # ── 4. Write Data Back to Google Sheet ────────────────────────────────
+#         if len(all_rows) > 0:
 #             worksheet.append_rows(new_rows, value_input_option="USER_ENTERED")
 #         else:
-#             # Empty or newly created sheet -> write headers first, then append rows
 #             headers = df.columns.tolist()
 #             worksheet.clear()
-#             worksheet.update([headers] + new_rows)
+#             worksheet.update([headers] + new_rows, value_input_option="USER_ENTERED")
+
+#         # Clear cached DataFrames to show updated database immediately
+#         st.cache_data.clear()
 
 #         uploaded_months = df["month"].dropna().unique().tolist()
-#         show_popup(f"Successfully appended {len(df)} records for month(s): {', '.join(uploaded_months)}!", type="success")
+#         success_msg = f"Successfully appended {len(df)} new record(s) for month(s): {', '.join(uploaded_months)}!"
+#         if skipped_count > 0:
+#             success_msg += f" (Skipped {skipped_count} existing duplicate invoice(s))."
 
-#         print(f"Successfully appended {len(df)} records for month(s): {', '.join(uploaded_months)}!")
-#         st.success(f"Successfully appended {len(df)} records for month(s): {', '.join(uploaded_months)}!")
+#         show_popup(success_msg, type="success")
+#         st.success(success_msg)
 #         return True
 
 #     except Exception as e:
 #         show_popup(f"Error processing file upload: {str(e)}", type="error")
 #         print(f"Upload Error: {e}")
 #         return False
+
+
 
 
 
