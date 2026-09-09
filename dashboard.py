@@ -560,6 +560,7 @@ def render_dashboard_page(sales_db: str):
                 "22/24 feet",
                 "32 SXL 7 ton",
                 "32 SXL 9 ton",
+                "SRT/ Internal Movement"
             ],
             required=False,
             disabled=False,
@@ -589,7 +590,7 @@ def render_dashboard_page(sales_db: str):
             help="Requires Bill No first before editing non-zero amounts",
         ),
         "detension_charges": st.column_config.NumberColumn(
-            "Detention Charges",
+            "Detention Charges/ ODA",
             format="%.2f",
             disabled=False,
             help="Requires Bill No first before editing non-zero amounts",
