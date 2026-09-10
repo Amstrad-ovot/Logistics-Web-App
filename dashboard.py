@@ -508,9 +508,24 @@ def render_dashboard_page(sales_db: str):
             type="secondary"
         )
 
+    # # ── Display Table Setup ─────────────────────────────────────
+    # display_df = filtered_df[DEFAULT_COLUMNS].copy()
+    
+    # if "challan_no" in display_df.columns:
+    #     display_df["challan_no"] = display_df["challan_no"].fillna("").astype(str).replace(["nan", "None", "<NA>"], "")
+
+    # if "bill_no" in display_df.columns:
+    #     display_df["bill_no"] = display_df["bill_no"].fillna("").astype(str)
+
+    # page_data = display_df.iloc[start_idx:end_idx].copy()
+
     # ── Display Table Setup ─────────────────────────────────────
     display_df = filtered_df[DEFAULT_COLUMNS].copy()
-    
+
+    # Ensure bill_date is explicitly cast to datetime so DateColumn editing works
+    if "bill_date" in display_df.columns:
+        display_df["bill_date"] = pd.to_datetime(display_df["bill_date"], errors="coerce")
+
     if "challan_no" in display_df.columns:
         display_df["challan_no"] = display_df["challan_no"].fillna("").astype(str).replace(["nan", "None", "<NA>"], "")
 
@@ -518,7 +533,7 @@ def render_dashboard_page(sales_db: str):
         display_df["bill_no"] = display_df["bill_no"].fillna("").astype(str)
 
     page_data = display_df.iloc[start_idx:end_idx].copy()
-
+    
     column_configuration = {
         col: st.column_config.Column(
             label=col.replace("_", " ").title(), disabled=True
