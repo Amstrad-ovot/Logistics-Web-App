@@ -255,12 +255,44 @@ def render_dashboard_page(sales_db: str):
             st.info("No records available for your assigned location(s).")
             return
 
+        # for col in DEFAULT_COLUMNS:
+        #     if col not in filtered.columns:
+        #         filtered[col] = ""
+
+        # if "bill_date" in filtered.columns:
+        #     filtered["bill_date"] = pd.to_datetime(filtered["bill_date"], errors="coerce").dt.date
+
+        # numeric_cols = [
+        #     "approx_distance", "provisional_freight_amount", "actual_freight_amount", "lr_charges",
+        #     "loading_charges", "unloading_charges", "detension_charges", "point_charges", "invoiced_value_fc"
+        # ]
+        
+        # for n_col in numeric_cols:
+        #     if n_col in filtered.columns:
+        #         filtered[n_col] = pd.to_numeric(filtered[n_col], errors="coerce").fillna(0.0)
+
+        # filtered = calculate_freight_percentages(filtered)
+        # st.session_state.working_df = filtered.copy()
+
+
         for col in DEFAULT_COLUMNS:
             if col not in filtered.columns:
                 filtered[col] = ""
 
         if "bill_date" in filtered.columns:
             filtered["bill_date"] = pd.to_datetime(filtered["bill_date"], errors="coerce").dt.date
+
+        # Explicitly convert flexible fields to clean string representations
+        flexible_text_cols = ["po_no", "bill_no", "challan_no", "vehicle_no", "eway_bill_no", "tax_invoice_no"]
+        for ft_col in flexible_text_cols:
+            if ft_col in filtered.columns:
+                filtered[ft_col] = (
+                    filtered[ft_col]
+                    .fillna("")
+                    .astype(str)
+                    .str.replace(r"\.0$", "", regex=True) # Strips trailing float decimals (e.g., "123.0" -> "123")
+                    .replace(["nan", "None", "<NA>", "NaN"], "")
+                )
 
         numeric_cols = [
             "approx_distance", "provisional_freight_amount", "actual_freight_amount", "lr_charges",
@@ -510,7 +542,11 @@ def render_dashboard_page(sales_db: str):
 
     # # ── Display Table Setup ─────────────────────────────────────
     # display_df = filtered_df[DEFAULT_COLUMNS].copy()
-    
+
+    # # Ensure bill_date is explicitly cast to datetime so DateColumn editing works
+    # if "bill_date" in display_df.columns:
+    #     display_df["bill_date"] = pd.to_datetime(display_df["bill_date"], errors="coerce")
+
     # if "challan_no" in display_df.columns:
     #     display_df["challan_no"] = display_df["challan_no"].fillna("").astype(str).replace(["nan", "None", "<NA>"], "")
 
@@ -519,21 +555,28 @@ def render_dashboard_page(sales_db: str):
 
     # page_data = display_df.iloc[start_idx:end_idx].copy()
 
+
     # ── Display Table Setup ─────────────────────────────────────
     display_df = filtered_df[DEFAULT_COLUMNS].copy()
 
-    # Ensure bill_date is explicitly cast to datetime so DateColumn editing works
     if "bill_date" in display_df.columns:
         display_df["bill_date"] = pd.to_datetime(display_df["bill_date"], errors="coerce")
 
-    if "challan_no" in display_df.columns:
-        display_df["challan_no"] = display_df["challan_no"].fillna("").astype(str).replace(["nan", "None", "<NA>"], "")
-
-    if "bill_no" in display_df.columns:
-        display_df["bill_no"] = display_df["bill_no"].fillna("").astype(str)
+    # Ensure all dynamic text columns retain object/string type
+    flexible_text_cols = ["po_no", "bill_no", "challan_no", "vehicle_no", "eway_bill_no"]
+    for ft_col in flexible_text_cols:
+        if ft_col in display_df.columns:
+            display_df[ft_col] = (
+                display_df[ft_col]
+                .fillna("")
+                .astype(str)
+                .str.replace(r"\.0$", "", regex=True)
+                .replace(["nan", "None", "<NA>", "NaN"], "")
+            )
 
     page_data = display_df.iloc[start_idx:end_idx].copy()
-    
+
+
     column_configuration = {
         col: st.column_config.Column(
             label=col.replace("_", " ").title(), disabled=True
@@ -555,10 +598,16 @@ def render_dashboard_page(sales_db: str):
         "cost_per_km": st.column_config.NumberColumn(
             "Cost Per KM", disabled=True, format="%.2f"
         ),
+        # "challan_no": st.column_config.TextColumn(
+        #     "Challan No",
+        #     disabled=False,
+        #     help="Enter alphanumeric Challan Number",
+        #     default="",
+        # ),
         "challan_no": st.column_config.TextColumn(
             "Challan No",
             disabled=False,
-            help="Enter alphanumeric Challan Number",
+            help="Accepts numbers, letters, or mixed alphanumeric characters",
             default="",
         ),
         "vehicle_type": st.column_config.SelectboxColumn(
@@ -622,11 +671,23 @@ def render_dashboard_page(sales_db: str):
         "loading_charges": st.column_config.NumberColumn(
             "Loading Charges", format="%.2f", disabled=False
         ),
+        # "po_no": st.column_config.TextColumn(
+        #     "PO No", disabled=False, default=""
+        # ),
         "po_no": st.column_config.TextColumn(
-            "PO No", disabled=False, default=""
+            "PO No",
+            disabled=False,
+            help="Accepts numbers, letters, or mixed alphanumeric characters",
+            default="",
         ),
+        # "bill_no": st.column_config.TextColumn(
+        #     "Bill No", disabled=False, default=""
+        # ),
         "bill_no": st.column_config.TextColumn(
-            "Bill No", disabled=False, default=""
+            "Bill No",
+            disabled=False,
+            help="Accepts numbers, letters, or mixed alphanumeric characters",
+            default="",
         ),
         "bill_date": st.column_config.DateColumn(
             "Bill Date", format="YYYY-MM-DD", disabled=False
