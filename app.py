@@ -222,7 +222,10 @@ elif page == "dashboard":
 
                 # Export to Excel
                 buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+                # with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+                #     summary.to_excel(writer, index=False, sheet_name="Summary")
+                #     df_result.to_excel(writer, index=False, sheet_name="Missing Updates Data")
+                with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
                     summary.to_excel(writer, index=False, sheet_name="Summary")
                     df_result.to_excel(writer, index=False, sheet_name="Missing Updates Data")
                 excel_data = buffer.getvalue()
