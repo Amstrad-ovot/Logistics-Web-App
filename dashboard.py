@@ -29,7 +29,7 @@ CONDITIONAL_COLS = {
 
 
 # ── Helper: Fetch Worksheet Data ─────────────────────────
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=30,show_spinner= False)
 def load_worksheet_data(sheet_name: str) -> pd.DataFrame:
     spreadsheet = connect_gsheet()
     worksheet = spreadsheet.worksheet(sheet_name)
@@ -196,7 +196,6 @@ def clear_dashboard_filters():
 
 # ── Main Dashboard Renderer ──────────────────────────────
 def render_dashboard_page(sales_db: str):
-    st.title("📌 Logistics Dashboard")
 
     PAGE_SIZE = 10
 
@@ -645,6 +644,8 @@ def render_dashboard_page(sales_db: str):
 
 
 
+
+
 # import re
 # import io
 # import time
@@ -659,7 +660,7 @@ def render_dashboard_page(sales_db: str):
 
 # DEFAULT_COLUMNS = [
 #     "id", "location_name", "invoice_type_desc", "invoice_doc_date", "tax_invoice_no",
-#     "customer_name","cust_city_name", "place_of_supply", "fg_qty", "selling_fc_value", "igst",
+#     "customer_name", "cust_city_name", "place_of_supply", "fg_qty", "selling_fc_value", "igst",
 #     "cgst", "sgst", "invoiced_value_fc", "vehicle_no", "eway_bill_no", "transporter_name", "challan_no",
 #     "vehicle_type", "approx_distance", "provisional_freight_amount",
 #     "provisional_perc", "actual_freight_amount", "actual_perc", "lr_charges", "loading_charges",
@@ -730,7 +731,7 @@ def render_dashboard_page(sales_db: str):
 
 #             id_col_idx = headers_lookup.index(id_col_clean) + 1
             
-#             # 🚀 OPTIMIZATION: Fetch entire ID column at once instead of calling find() N times
+#             # Fetch entire ID column at once
 #             column_ids = worksheet.col_values(id_col_idx)
 #             id_to_row_map = {str(val).strip(): idx + 1 for idx, val in enumerate(column_ids)}
 
@@ -774,35 +775,6 @@ def render_dashboard_page(sales_db: str):
 #             st.error(f"Failed to update Database: {e}")
 #             return False
 
-        
-# # # ── Helper: Filter Data by User Location ─────────────────
-# # def filter_by_user_location(df: pd.DataFrame) -> pd.DataFrame:
-# #     if df.empty:
-# #         return df
-
-# #     user_role = str(st.session_state.get("user_role", "")).strip().lower()
-# #     if user_role in ("admin", "super admin", "superadmin"):
-# #         return df
-
-# #     raw_locations = st.session_state.get("user_regions") or st.session_state.get("user_locations") or st.session_state.get("location", "")
-# #     if not raw_locations:
-# #         st.warning("⚠️ No assigned location found in session state.")
-# #         return pd.DataFrame(columns=df.columns)
-
-# #     allowed_locations = set()
-# #     if isinstance(raw_locations, str):
-# #         allowed_locations = {loc.strip().lower() for loc in raw_locations.split(",") if loc.strip()}
-# #     elif isinstance(raw_locations, (list, tuple, set)):
-# #         allowed_locations = {str(loc).strip().lower() for loc in raw_locations if str(loc).strip()}
-
-# #     loc_col = next((c for c in df.columns if c.strip().lower() == "location_name"), None)
-# #     if loc_col and allowed_locations:
-# #         clean_col = df[loc_col].astype(str).str.strip().str.lower()
-# #         return df[clean_col.isin(allowed_locations)]
-
-# #     st.error("⚠️ Column 'location_name' was not found in dataset.")
-# #     return pd.DataFrame(columns=df.columns)
-
 
 # def filter_by_user_location(df: pd.DataFrame) -> pd.DataFrame:
 #     if df.empty:
@@ -825,18 +797,14 @@ def render_dashboard_page(sales_db: str):
 
 #     loc_col = next((c for c in df.columns if c.strip().lower() == "location_name"), None)
 #     if loc_col and allowed_locations:
-#         # Escape special regex characters in locations for safety
 #         escaped_locations = [re.escape(loc) for loc in allowed_locations]
-        
-#         # Combine locations into a single regex pattern (e.g., "raipur|lucknow")
 #         pattern = "|".join(escaped_locations)
-        
-#         # Use str.contains with case=False and regex=True
 #         mask = df[loc_col].astype(str).str.contains(pattern, case=False, na=False)
 #         return df[mask]
 
 #     st.error("⚠️ Column 'location_name' was not found in dataset.")
 #     return pd.DataFrame(columns=df.columns)
+
 
 # # ── Helper: Calculate Freight Percentages & Totals ───────────────
 # def calculate_freight_percentages(df: pd.DataFrame) -> pd.DataFrame:
@@ -862,6 +830,16 @@ def render_dashboard_page(sales_db: str):
 #     )
 
 #     return df
+
+
+# # ── Helper: Clear Saved Filter State ─────────────────────────────
+# def clear_dashboard_filters():
+#     filter_keys = [
+#         "filter_locations", "filter_pos", "filter_transporters", 
+#         "filter_cities", "filter_from_date", "filter_to_date", "filter_invoices"
+#     ]
+#     for k in filter_keys:
+#         st.session_state.pop(k, None)
 
 
 # # ── Main Dashboard Renderer ──────────────────────────────
@@ -902,26 +880,6 @@ def render_dashboard_page(sales_db: str):
 #             st.info("No records available for your assigned location(s).")
 #             return
 
-#         # for col in DEFAULT_COLUMNS:
-#         #     if col not in filtered.columns:
-#         #         filtered[col] = ""
-
-#         # if "bill_date" in filtered.columns:
-#         #     filtered["bill_date"] = pd.to_datetime(filtered["bill_date"], errors="coerce").dt.date
-
-#         # numeric_cols = [
-#         #     "approx_distance", "provisional_freight_amount", "actual_freight_amount", "lr_charges",
-#         #     "loading_charges", "unloading_charges", "detension_charges", "point_charges", "invoiced_value_fc"
-#         # ]
-        
-#         # for n_col in numeric_cols:
-#         #     if n_col in filtered.columns:
-#         #         filtered[n_col] = pd.to_numeric(filtered[n_col], errors="coerce").fillna(0.0)
-
-#         # filtered = calculate_freight_percentages(filtered)
-#         # st.session_state.working_df = filtered.copy()
-
-
 #         for col in DEFAULT_COLUMNS:
 #             if col not in filtered.columns:
 #                 filtered[col] = ""
@@ -929,7 +887,6 @@ def render_dashboard_page(sales_db: str):
 #         if "bill_date" in filtered.columns:
 #             filtered["bill_date"] = pd.to_datetime(filtered["bill_date"], errors="coerce").dt.date
 
-#         # Explicitly convert flexible fields to clean string representations
 #         flexible_text_cols = ["po_no", "bill_no", "challan_no", "vehicle_no", "eway_bill_no", "tax_invoice_no"]
 #         for ft_col in flexible_text_cols:
 #             if ft_col in filtered.columns:
@@ -937,7 +894,7 @@ def render_dashboard_page(sales_db: str):
 #                     filtered[ft_col]
 #                     .fillna("")
 #                     .astype(str)
-#                     .str.replace(r"\.0$", "", regex=True) # Strips trailing float decimals (e.g., "123.0" -> "123")
+#                     .str.replace(r"\.0$", "", regex=True)
 #                     .replace(["nan", "None", "<NA>", "NaN"], "")
 #                 )
 
@@ -959,7 +916,7 @@ def render_dashboard_page(sales_db: str):
 #     df_work = st.session_state.working_df
 #     col_id = next((c for c in df_work.columns if c.strip().lower() == "id"), "id")
 
-#     # ── Filters Section (Cascading / Dynamic Dependent Options) ──────────────
+#     # ── Filters Section (Cascading / Dynamic Dependent Options with Persistent State) ──────────────
 #     st.markdown("### 🔍 Filter Records")
 
 #     col_loc = next((c for c in df_work.columns if c.strip().lower() == "location_name"), None)
@@ -986,25 +943,25 @@ def render_dashboard_page(sales_db: str):
 
 #     with f1:
 #         loc_opts = sorted(curr_df[col_loc].dropna().astype(str).unique()) if col_loc else []
-#         selected_locations = st.multiselect("Location Name", options=loc_opts)
+#         selected_locations = st.multiselect("Location Name", options=loc_opts, key="filter_locations")
 #         if col_loc and selected_locations:
 #             curr_df = curr_df[curr_df[col_loc].astype(str).isin(selected_locations)]
 
 #     with f2:
 #         pos_opts = sorted(curr_df[col_pos].dropna().astype(str).unique()) if col_pos else []
-#         selected_pos = st.multiselect("Place of Supply", options=pos_opts)
+#         selected_pos = st.multiselect("Place of Supply", options=pos_opts, key="filter_pos")
 #         if col_pos and selected_pos:
 #             curr_df = curr_df[curr_df[col_pos].astype(str).isin(selected_pos)]
 
 #     with f3:
 #         trans_opts = sorted(curr_df[col_trans].dropna().astype(str).unique()) if col_trans else []
-#         selected_transporters = st.multiselect("Transporter Name", options=trans_opts)
+#         selected_transporters = st.multiselect("Transporter Name", options=trans_opts, key="filter_transporters")
 #         if col_trans and selected_transporters:
 #             curr_df = curr_df[curr_df[col_trans].astype(str).isin(selected_transporters)]
 
 #     with f4:
 #         city_opts = sorted(curr_df[col_city].dropna().astype(str).unique()) if col_city else []
-#         selected_city = st.multiselect("Cust City Name", options=city_opts)
+#         selected_city = st.multiselect("Cust City Name", options=city_opts, key="filter_cities")
 #         if col_city and selected_city:
 #             curr_df = curr_df[curr_df[col_city].astype(str).isin(selected_city)]
 
@@ -1012,18 +969,18 @@ def render_dashboard_page(sales_db: str):
 #     d1, d2, d3, d4 = st.columns(4)
 
 #     with d1:
-#         from_date = st.date_input("From Date", value=None)
+#         from_date = st.date_input("From Date", value=st.session_state.get("filter_from_date", None), key="filter_from_date")
 #         if from_date and "parsed_invoice_date" in curr_df:
 #             curr_df = curr_df[curr_df["parsed_invoice_date"].dt.date >= from_date]
 
 #     with d2:
-#         to_date = st.date_input("To Date", value=None)
+#         to_date = st.date_input("To Date", value=st.session_state.get("filter_to_date", None), key="filter_to_date")
 #         if to_date and "parsed_invoice_date" in curr_df:
 #             curr_df = curr_df[curr_df["parsed_invoice_date"].dt.date <= to_date]
 
 #     with d3:
 #         invoice_opts = sorted(curr_df[col_invoice].dropna().astype(str).unique()) if col_invoice else []
-#         selected_invoice = st.multiselect("Tax Invoice No.", options=invoice_opts)
+#         selected_invoice = st.multiselect("Tax Invoice No.", options=invoice_opts, key="filter_invoices")
 #         if col_invoice and selected_invoice:
 #             curr_df = curr_df[curr_df[col_invoice].astype(str).isin(selected_invoice)]
 
@@ -1033,11 +990,11 @@ def render_dashboard_page(sales_db: str):
 #         if st.button("🔄 Refresh Data", width="stretch", type="secondary"):
 #             st.session_state.pop("working_df", None)
 #             st.session_state.pop("pending_edits", None)
+#             clear_dashboard_filters()
 #             st.cache_data.clear()
 #             st.session_state.last_auto_refresh = time.time()
 #             st.rerun()
 
-#     # Final result applied directly to filtered_df
 #     filtered_df = curr_df.copy()
 
 #     st.markdown("---")
@@ -1070,7 +1027,6 @@ def render_dashboard_page(sales_db: str):
 #                 current_row = page_slice.iloc[row_idx]
 #                 record_id = str(current_row[col_id]).strip()
 
-#                 # Determine the exact current bill_no across pending edits, working_df, or fallback row
 #                 working_match = st.session_state.working_df[
 #                     st.session_state.working_df[col_id].astype(str).str.strip() == record_id
 #                 ]
@@ -1094,7 +1050,6 @@ def render_dashboard_page(sales_db: str):
 #                 for col_k, val_v in changes.items():
 #                     if col_k == "bill_no":
 #                         continue
-#                     # Check if user attempts to edit a restricted column without a Bill No
 #                     if col_k in CONDITIONAL_COLS and not has_bill_no and float(val_v or 0.0) != 0.0:
 #                         blocked_cols.append(col_k.replace("_", " ").title())
 #                         valid_changes[col_k] = 0.0
@@ -1106,13 +1061,8 @@ def render_dashboard_page(sales_db: str):
 #                     st.toast(
 #                         f"Enter **Bill No** first before adding {', '.join(blocked_cols)} across the ID {record_id}.", 
 #                         icon="🚫",
-#                         duration = "long"
+#                         duration="long"
 #                     )
-#                     # st.toast(
-#                     #     f"⚠️ **ID #{record_id}**: Enter **Bill No** first before adding charges: {', '.join(blocked_cols)}.", 
-#                     #     icon="🚫",
-#                     #     duration = "long"
-#                     # )
 
 #                 if valid_changes:
 #                     if record_id not in st.session_state.pending_edits:
@@ -1120,7 +1070,6 @@ def render_dashboard_page(sales_db: str):
 
 #                     st.session_state.pending_edits[record_id].update(valid_changes)
 
-#                     # Update working dataframe locally
 #                     main_mask = (
 #                         st.session_state.working_df[col_id]
 #                         .astype(str)
@@ -1130,21 +1079,17 @@ def render_dashboard_page(sales_db: str):
 #                     for k, v in valid_changes.items():
 #                         st.session_state.working_df.loc[main_mask, k] = v
 
-#                     # Recalculate percentages & totals
 #                     st.session_state.working_df = calculate_freight_percentages(
 #                         st.session_state.working_df
 #                     )
 
-#                     # Update calculated columns into pending edits
 #                     updated_row = st.session_state.working_df[main_mask].iloc[0]
 #                     for calc_col in ["provisional_perc", "actual_perc", "total_freight_cost", "cost_per_km"]:
 #                         if calc_col in updated_row:
 #                             st.session_state.pending_edits[record_id][calc_col] = updated_row[calc_col]
 
-#         # Sync working DF back into local filter subset
 #         filtered_df.update(st.session_state.working_df)
 
-#         # If illegal edits occurred, bump editor version key to force UI state reset
 #         if illegal_edit_intercepted:
 #             st.session_state.editor_key_version += 1
 #             st.rerun()
@@ -1187,29 +1132,12 @@ def render_dashboard_page(sales_db: str):
 #             type="secondary"
 #         )
 
-#     # # ── Display Table Setup ─────────────────────────────────────
-#     # display_df = filtered_df[DEFAULT_COLUMNS].copy()
-
-#     # # Ensure bill_date is explicitly cast to datetime so DateColumn editing works
-#     # if "bill_date" in display_df.columns:
-#     #     display_df["bill_date"] = pd.to_datetime(display_df["bill_date"], errors="coerce")
-
-#     # if "challan_no" in display_df.columns:
-#     #     display_df["challan_no"] = display_df["challan_no"].fillna("").astype(str).replace(["nan", "None", "<NA>"], "")
-
-#     # if "bill_no" in display_df.columns:
-#     #     display_df["bill_no"] = display_df["bill_no"].fillna("").astype(str)
-
-#     # page_data = display_df.iloc[start_idx:end_idx].copy()
-
-
 #     # ── Display Table Setup ─────────────────────────────────────
 #     display_df = filtered_df[DEFAULT_COLUMNS].copy()
 
 #     if "bill_date" in display_df.columns:
 #         display_df["bill_date"] = pd.to_datetime(display_df["bill_date"], errors="coerce")
 
-#     # Ensure all dynamic text columns retain object/string type
 #     flexible_text_cols = ["po_no", "bill_no", "challan_no", "vehicle_no", "eway_bill_no"]
 #     for ft_col in flexible_text_cols:
 #         if ft_col in display_df.columns:
@@ -1222,7 +1150,6 @@ def render_dashboard_page(sales_db: str):
 #             )
 
 #     page_data = display_df.iloc[start_idx:end_idx].copy()
-
 
 #     column_configuration = {
 #         col: st.column_config.Column(
@@ -1245,12 +1172,6 @@ def render_dashboard_page(sales_db: str):
 #         "cost_per_km": st.column_config.NumberColumn(
 #             "Cost Per KM", disabled=True, format="%.2f"
 #         ),
-#         # "challan_no": st.column_config.TextColumn(
-#         #     "Challan No",
-#         #     disabled=False,
-#         #     help="Enter alphanumeric Challan Number",
-#         #     default="",
-#         # ),
 #         "challan_no": st.column_config.TextColumn(
 #             "Challan No",
 #             disabled=False,
@@ -1276,10 +1197,10 @@ def render_dashboard_page(sales_db: str):
 #             required=False,
 #             disabled=False,
 #         ),
-#         "transporter_name" : st.column_config.SelectboxColumn(
+#         "transporter_name": st.column_config.SelectboxColumn(
 #             "Transporter Name",
-#             options = st.secrets["connections"]["gsheets"]["transporter_list"],
-#             required= False,
+#             options=st.secrets["connections"]["gsheets"]["transporter_list"],
+#             required=False,
 #             disabled=False
 #         ),
 #         "approx_distance": st.column_config.NumberColumn(
@@ -1318,18 +1239,12 @@ def render_dashboard_page(sales_db: str):
 #         "loading_charges": st.column_config.NumberColumn(
 #             "Loading Charges", format="%.2f", disabled=False
 #         ),
-#         # "po_no": st.column_config.TextColumn(
-#         #     "PO No", disabled=False, default=""
-#         # ),
 #         "po_no": st.column_config.TextColumn(
 #             "PO No",
 #             disabled=False,
 #             help="Accepts numbers, letters, or mixed alphanumeric characters",
 #             default="",
 #         ),
-#         # "bill_no": st.column_config.TextColumn(
-#         #     "Bill No", disabled=False, default=""
-#         # ),
 #         "bill_no": st.column_config.TextColumn(
 #             "Bill No",
 #             disabled=False,
@@ -1350,7 +1265,6 @@ def render_dashboard_page(sales_db: str):
 
 #     st.markdown("##### ✏️ Double click any cell below to edit value:")
 
-#     # Render table with dynamic key versioning to allow instant resets
 #     st.data_editor(
 #         page_data,
 #         column_config=column_configuration,
@@ -1372,6 +1286,7 @@ def render_dashboard_page(sales_db: str):
 #             if success:
 #                 st.success("✅ Changes saved to Database successfully!")
 #                 st.session_state.pending_edits = {}
+#                 # Force reloading from Google Sheet while maintaining session state filters
 #                 st.session_state.pop("working_df", None)
 #                 time.sleep(1)
 #                 st.rerun()
