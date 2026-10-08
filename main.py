@@ -5,7 +5,6 @@ import gspread
 import numpy as np
 import pandas as pd
 import streamlit as st
-from datetime import date
 from gspread.utils import rowcol_to_a1
 from google.auth.transport.requests import Request
 from datetime import datetime, timedelta,date
@@ -17,49 +16,121 @@ from google.oauth2.service_account import Credentials
 # Connection & UI Layer (Fixed Connection Drops)
 # ──────────────────────────────────────────────
 
+# ──────────────────────────────────────────────
+# Google Sheets Connection / Resilient API Layer
+# ──────────────────────────────────────────────
+
+# Google APIs can temporarily return 429/5xx responses.  Do not immediately
+# fail the Streamlit request; retry only transient errors with exponential backoff.
+TRANSIENT_GSHEET_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+def _is_transient_gsheet_error(exc: Exception) -> bool:
+    """Return True when an exception is likely temporary and safe to retry."""
+    try:
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if status_code in TRANSIENT_GSHEET_STATUS_CODES:
+            return True
+    except Exception:
+        pass
+
+    text = str(exc).lower()
+    transient_terms = (
+        "service is currently unavailable",
+        "service unavailable",
+        "timed out",
+        "timeout",
+        "connection reset",
+        "connection aborted",
+        "connection broken",
+        "temporarily unavailable",
+        "remote end closed",
+        "502",
+        "503",
+        "504",
+        "429",
+    )
+    return any(term in text for term in transient_terms)
+
+
+def _run_gsheet_call(operation, max_retries: int = 4, base_delay: float = 1.0):
+    """Execute one Google Sheets operation with exponential backoff."""
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            return operation()
+        except Exception as exc:
+            last_error = exc
+
+            if not _is_transient_gsheet_error(exc) or attempt >= max_retries - 1:
+                raise
+
+            # 1s, 2s, 4s ... plus a tiny cap keeps retries predictable.
+            delay = min(base_delay * (2 ** attempt), 8.0)
+            time.sleep(delay)
+
+    raise last_error
+
+
+@st.cache_resource(ttl=1800, show_spinner=False)
 def get_gsheet_conn():
+    """Create one reusable gspread client per Streamlit process."""
+    gsheets = st.secrets["connections"]["gsheets"]
+
     creds_dict = {
-        "type": st.secrets["connections"]["gsheets"]["type"],
-        "project_id": st.secrets["connections"]["gsheets"]["project_id"],
-        "private_key_id": st.secrets["connections"]["gsheets"]["private_key_id"],
-        "private_key": st.secrets["connections"]["gsheets"]["private_key"],
-        "client_email": st.secrets["connections"]["gsheets"]["client_email"],
-        "client_id": st.secrets["connections"]["gsheets"]["client_id"],
-        "auth_uri": st.secrets["connections"]["gsheets"]["auth_uri"],
-        "token_uri": st.secrets["connections"]["gsheets"]["token_uri"],
+        "type": gsheets["type"],
+        "project_id": gsheets["project_id"],
+        "private_key_id": gsheets["private_key_id"],
+        "private_key": gsheets["private_key"],
+        "client_email": gsheets["client_email"],
+        "client_id": gsheets["client_id"],
+        "auth_uri": gsheets["auth_uri"],
+        "token_uri": gsheets["token_uri"],
     }
 
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
+        "https://www.googleapis.com/auth/drive",
     ]
 
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    
-    # Refresh credentials proactively to prevent expired token drops
-    if creds.expired:
+
+    if not creds.valid or creds.expired:
         creds.refresh(Request())
 
-    # Pass authorized credentials with optimized timeout configuration
-    client = gspread.authorize(creds)
-    return client
+    return gspread.authorize(creds)
 
 
+@st.cache_resource(ttl=1800, show_spinner=False)
 def connect_gsheet():
-    """Connects to Google Sheets with retry mechanism to prevent WinError 10054 drops."""
-    max_retries = 3
-    for attempt in range(max_retries):
+    """Open the configured spreadsheet with retry handling for transient errors."""
+    spreadsheet_id = st.secrets["connections"]["gsheets"]["spreadsheet_id"]
+
+    try:
+        client = get_gsheet_conn()
+        return _run_gsheet_call(
+            lambda: client.open_by_key(spreadsheet_id),
+            max_retries=4,
+            base_delay=1.0,
+        )
+    except Exception:
+        # If the cached client became stale, rebuild it once on the next attempt.
         try:
-            client = get_gsheet_conn()
-            SPREADSHEET_ID = st.secrets["connections"]["gsheets"]["spreadsheet_id"]
-            spreadsheet = client.open_by_key(SPREADSHEET_ID)
-            return spreadsheet
-        except Exception as e:
-            if attempt == max_retries - 1:
-                print(f"Unable to connect google sheet after {max_retries} attempts: {e}")
-                show_popup(f"Connection lost. Please check your internet or retry.", type="error")
-                raise e
-            time.sleep(2)  # Wait 2 seconds before retrying socket connection
+            get_gsheet_conn.clear()
+        except Exception:
+            pass
+        raise
+
+
+def gsheet_call(operation, max_retries: int = 4):
+    """Public helper for individual worksheet reads/writes.
+
+    Use this around get_all_records(), get_all_values(), update(), batch_update(),
+    etc. so a temporary Google 503 does not immediately break the app.
+    """
+    return _run_gsheet_call(operation, max_retries=max_retries, base_delay=1.0)
 
 
 def show_popup(message, type="success"):
@@ -217,7 +288,7 @@ def process_and_upload_excel(uploaded_file, target_sheet_name: str, custom_sheet
 
         try:
             custom_ws = spreadsheet.worksheet(custom_sheet)
-            custom_records = custom_ws.get_all_records()
+            custom_records = gsheet_call(lambda: custom_ws.get_all_records())
 
             if custom_records:
                 custom_df = pd.DataFrame(custom_records)
@@ -275,7 +346,7 @@ def process_and_upload_excel(uploaded_file, target_sheet_name: str, custom_sheet
         # ── 3. Target Worksheet Setup & Deduplication Check ──────────────────
         try:
             worksheet = spreadsheet.worksheet(target_sheet_name)
-            all_rows = worksheet.get_all_values()
+            all_rows = gsheet_call(lambda: worksheet.get_all_values())
         except gspread.exceptions.WorksheetNotFound:
             worksheet = spreadsheet.add_worksheet(
                 title=target_sheet_name, rows=1000, cols=len(df.columns) + 2
@@ -403,6 +474,236 @@ def upload_customised_report(uploaded_customised_file, target_sheet_name):
         return False  # Return False instead of None
 
 
+def upload_inward_data_excel(
+    uploaded_file, target_sheet_name: str):
+  try:
+    # ── 1. Read Excel file into Pandas DataFrame ─────────────────────────
+    df = pd.read_excel(uploaded_file)
+
+    # Standardize column names
+    df.columns = [
+        str(col)
+        .strip()
+        .lower()
+        .replace(" ", "_")
+        .replace(".", "")
+        .replace("(", "")
+        .replace(")", "")
+        for col in df.columns
+    ]
+    
+    selected_columns = [
+        "location_name",
+        "grn_no",
+        "grn_document_no",
+        "grn_document_date",
+        "item_category",
+        "supplier_name",
+        "challan_no",
+        "challan_date",
+        "grn_qty",
+        "group_display_name",
+        "basic",
+        "cgst_input_9%",
+        "igst_input_18%",
+        "sgst_input_9%",
+        "total",
+        "transporter_name",
+        "vehicle_no",
+        "vehicle_type",
+        "approx_distance",
+    ]
+
+    # Ensure all selected columns exist in incoming dataframe
+    for col in selected_columns:
+      if col not in df.columns:
+        df[col] = ""
+
+    # ── EXCLUDE SUMMARY / COUNT ROWS ─────────────────────────────────────
+    first_col = df.columns[0]
+    count_mask = (
+        df[first_col].astype(str).str.lower().str.contains("count", na=False)
+    )
+    df = df[~count_mask]
+
+    # Convert dates and drop invalid/empty date rows
+    parsed_dates = pd.to_datetime(
+        df["grn_document_date"], format="%d/%m/%Y", errors="coerce"
+    )
+
+    if parsed_dates.isna().all():
+      parsed_dates = pd.to_datetime(
+          df["grn_document_date"], errors="coerce"
+      )
+
+    valid_date_mask = parsed_dates.notna()
+    df = df[valid_date_mask].copy()
+
+    if df.empty:
+      show_popup(
+          "No valid transaction rows found after dropping count/summary rows.",
+          type="error",
+      )
+      return False
+
+    # Filter to selected target columns & format grn_document_no strictly
+    df = df[selected_columns]
+
+    # Clean grn_document_no (handle float conversions like 1001.0 -> '1001')
+    def clean_doc_no(val):
+      val_str = str(val).strip()
+      if val_str.endswith(".0"):
+        val_str = val_str[:-2]
+      return val_str
+
+    df["grn_document_no"] = df["grn_document_no"].apply(clean_doc_no)
+
+    # ── GROUPBY AGGREGATION ──────────────────────────────────────────────
+    numeric_cols = [
+        "grn_qty",
+        "basic",
+        "cgst_input_9%",
+        "igst_input_18%",
+        "sgst_input_9%",
+        "total",
+    ]
+    string_cols = [
+        "location_name",
+        "grn_no",
+        "grn_document_no",
+        "grn_document_date",
+        "item_category",
+        "supplier_name",
+        "challan_no",
+        "challan_date",
+        "group_display_name",
+        "transporter_name",
+        "vehicle_no",
+        "vehicle_type",
+        "approx_distance",
+    ]
+
+    # Ensure numeric columns are coerced properly before summing
+    for col in numeric_cols:
+      df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    # Helper function to join distinct non-null string values with comma
+    def unique_join(series):
+      unique_vals = [
+          str(v).strip() for v in series.dropna().unique() if str(v).strip() != ""
+      ]
+      return ", ".join(unique_vals)
+
+    # Build aggregation mapping
+    agg_dict = {col: "sum" for col in numeric_cols}
+    agg_dict.update({col: unique_join for col in string_cols if col != "grn_document_no"})
+
+    # Apply GroupBy on grn_document_no
+    df = df.groupby("grn_document_no", as_index=False).agg(agg_dict)
+
+    # Re-parse grn_document_date post aggregation (take the first date if multiple exist)
+    df["grn_document_date"] = df["grn_document_date"].apply(
+        lambda x: str(x).split(",")[0].strip() if x else ""
+    )
+
+    prefix_series = df["grn_no"].astype(str).str.split("-").str[0].str.strip()
+    category_map = {"0500": "purchase", "0501": "srt"}
+    df["purchaseorsrt"] = prefix_series.map(category_map).fillna("")
+
+    parsed_dates = pd.to_datetime(
+        df["grn_document_date"], format="%d/%m/%Y", errors="coerce"
+    )
+    if parsed_dates.isna().all():
+      parsed_dates = pd.to_datetime(
+          df["grn_document_date"], errors="coerce"
+      )
+
+    # ── Connect to Google Sheets ──────────────────────────────────────────
+    spreadsheet = connect_gsheet()
+
+    # Add Unique ID, Processed Month, and Formatting
+    df.insert(0, "id", [uuid.uuid4().hex for _ in range(len(df))])
+    df["month"] = parsed_dates.dt.strftime("%b-%y")
+    df["created_date"] = date.today().strftime("%Y-%m-%d")
+    df["grn_document_date"] = parsed_dates.dt.strftime("%d/%m/%Y")
+
+    # ── 3. Target Worksheet Setup & Strict Deduplication Check ──────────
+    try:
+      worksheet = spreadsheet.worksheet(target_sheet_name)
+      all_rows = gsheet_call(lambda: worksheet.get_all_values())
+    except gspread.exceptions.WorksheetNotFound:
+      worksheet = spreadsheet.add_worksheet(
+          title=target_sheet_name, rows=1000, cols=len(df.columns) + 2
+      )
+      all_rows = []
+
+    existing_invoices = set()
+
+    if len(all_rows) > 1:
+      # Normalize headers from Google Sheet
+      headers_lower = [str(h).strip().lower() for h in all_rows[0]]
+      if "grn_document_no" in headers_lower:
+        tax_inv_col_idx = headers_lower.index("grn_document_no")
+        
+        # Build set of existing cleaned grn_document_no values
+        for row in all_rows[1:]:
+          if len(row) > tax_inv_col_idx:
+            raw_val = str(row[tax_inv_col_idx]).strip()
+            if raw_val:
+              existing_invoices.add(clean_doc_no(raw_val))
+
+    # ── Filter out duplicate grn_document_no rows ────────────────────────
+    initial_count = len(df)
+    
+    # Strictly match normalized strings
+    df = df[~df["grn_document_no"].apply(clean_doc_no).isin(existing_invoices)].copy()
+
+    skipped_count = initial_count - len(df)
+
+    if df.empty:
+      msg = (
+          f"All {skipped_count} record(s) in this file already exist in"
+          f" '{target_sheet_name}'. No new records added."
+      )
+      show_popup(msg, type="warning")
+      st.warning(msg)
+      return True
+
+    # Clean NaN/NaT values for JSON compatibility
+    df = df.replace({np.nan: None})
+    new_rows = df.where(df.notnull(), "").values.tolist()
+
+    # ── 4. Write Data Back to Google Sheet ───────────────────────────────
+    if len(all_rows) > 0:
+      worksheet.append_rows(new_rows, value_input_option="USER_ENTERED")
+    else:
+      headers = df.columns.tolist()
+      worksheet.clear()
+      worksheet.update(
+          [headers] + new_rows, value_input_option="USER_ENTERED"
+      )
+
+    st.cache_data.clear()
+
+    uploaded_months = df["month"].dropna().unique().tolist()
+    success_msg = (
+        f"Successfully appended {len(df)} new record(s) for month(s):"
+        f" {', '.join(uploaded_months)}!"
+    )
+    if skipped_count > 0:
+      success_msg += (
+          f" (Skipped {skipped_count} existing duplicate invoice(s)).")
+
+    show_popup(success_msg, type="success")
+    st.success(success_msg)
+    return True
+
+  except Exception as e:
+    show_popup(f"Error processing file upload: {str(e)}", type="error")
+    print(f"Upload Error: {e}")
+    return False
+
+
 def missing_updates(
     from_date=None,
     to_date=None,
@@ -414,7 +715,7 @@ def missing_updates(
     # 1. Fetch data from Google Sheet
     spreadsheet = connect_gsheet()
     worksheet = spreadsheet.worksheet(target_sheet_name)
-    records = worksheet.get_all_records()
+    records = gsheet_call(lambda: worksheet.get_all_records())
 
     if not records:
       show_popup("No records found in the sheet.", type="warning")
