@@ -1,21 +1,17 @@
 import streamlit as st
-from main import connect_gsheet, show_popup
+from main import connect_gsheet, gsheet_call, show_popup
 
 
 # ──────────────────────────────────────────────
 # Data layer
 # ──────────────────────────────────────────────
 
-@st.cache_data(ttl=60, show_spinner= False)  # Caches result for 60 seconds to prevent hitting GSheet API limits
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_users():
-    """Fetches user records from the 'Users' tab in Google Sheets."""
-    try:
-        spreadsheet = connect_gsheet()
-        users_ws = spreadsheet.worksheet("Users")
-        return users_ws.get_all_records()
-    except Exception as e:
-        st.error(f"Could not fetch users: {e}")
-        return []
+    """Fetch Users once per 10 minutes and retry temporary Google API failures."""
+    spreadsheet = connect_gsheet()
+    users_ws = gsheet_call(lambda: spreadsheet.worksheet("Users"))
+    return gsheet_call(lambda: users_ws.get_all_records())
 
 
 # ──────────────────────────────────────────────
@@ -24,7 +20,16 @@ def fetch_users():
 
 def authenticate(mobile: str, password: str):
     """Matches provided mobile and password against the Google Sheet records."""
-    users = fetch_users()
+    try:
+        users = fetch_users()
+    except Exception as e:
+        st.error(
+            "Google Sheets is temporarily unavailable. "
+            "Please wait a few seconds and try signing in again."
+        )
+        print(f"User fetch failed: {e}")
+        return None
+
     clean_mobile = str(mobile).strip()
     clean_password = str(password).strip()
 
