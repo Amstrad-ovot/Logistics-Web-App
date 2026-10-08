@@ -5,64 +5,69 @@ import streamlit as st
 from datetime import date, timedelta
 from login import render_login_page
 from src.sidebar import render_sidebar
-from dashboard import render_dashboard_page
-from main import process_and_upload_excel, upload_customised_report, missing_updates, connect_gsheet
+from dashboard import render_purchase_dashboard, render_sales_dashboard
+from main import (
+    process_and_upload_excel,
+    upload_customised_report,
+    missing_updates,
+    connect_gsheet,
+    gsheet_call,
+    upload_inward_data_excel,
+)
 
+# Fetch database sheet identifiers from Streamlit secrets
 sales_db = st.secrets["connections"]["gsheets"]["sales_sheet"]
 custom_db = st.secrets["connections"]["gsheets"]["custom_sheet"]
+purchase_db = st.secrets["connections"]["gsheets"]["purchase_sheet"]
 
 
 # Helper: Normalize text for flexible partial matching
 def _clean_token(text: str) -> str:
-    return re.sub(r'[^a-z0-9]', '', str(text).lower())
+    return re.sub(r"[^a-z0-9]", "", str(text).lower())
 
 
-# Helper: Fetch unique locations, filtered by user permission role with partial matching
-@st.cache_data(ttl=300, show_spinner= False)
+# Helper: Fetch unique locations for a specific sheet, filtered by user permissions
+@st.cache_data(ttl=300, show_spinner=False)
 def get_available_locations(sheet_name, user_role="", raw_user_locations=None):
     try:
         spreadsheet = connect_gsheet()
-        worksheet = spreadsheet.worksheet(sheet_name)
-        records = worksheet.get_all_records()
-        if records:
-            df = pd.DataFrame(records)
-            df.columns = [str(c).strip().lower() for c in df.columns]
-            
-            if "location_name" in df.columns:
-                all_locations = sorted(df["location_name"].dropna().astype(str).str.strip().unique().tolist())
-                
-                role_clean = str(user_role).strip().lower()
+        worksheet = gsheet_call(lambda: spreadsheet.worksheet(sheet_name))
+        
+        # Optimize by fetching header first to find location column index
+        headers = [str(h).strip().lower() for h in gsheet_call(lambda: worksheet.row_values(1))]
+        
+        if "location_name" in headers:
+            col_idx = headers.index("location_name") + 1
+            raw_locations = gsheet_call(lambda: worksheet.col_values(col_idx))[1:]  # Exclude header
+            all_locations = sorted(list(set(str(loc).strip() for loc in raw_locations if str(loc).strip())))
 
-                # Admins get full access to all dataset locations
-                if role_clean in ("admin", "super admin", "superadmin"):
-                    return all_locations
+            role_clean = str(user_role).strip().lower()
 
-                # Parse allowed regions from user session
-                raw_list = []
-                if isinstance(raw_user_locations, str):
-                    raw_list = [loc.strip() for loc in raw_user_locations.split(",") if loc.strip()]
-                elif isinstance(raw_user_locations, (list, tuple, set)):
-                    raw_list = [str(loc).strip() for loc in raw_user_locations if str(loc).strip()]
+            # Admins get full access to all dataset locations
+            if role_clean in ("admin", "super admin", "superadmin"):
+                return all_locations
 
-                if raw_list:
-                    matched_locations = []
-                    
-                    # Clean tokens for flexible comparison (e.g. "kerala", "ernakulam")
-                    user_tokens = [_clean_token(loc) for loc in raw_list if _clean_token(loc)]
+            # Parse allowed regions from user session
+            raw_list = []
+            if isinstance(raw_user_locations, str):
+                raw_list = [loc.strip() for loc in raw_user_locations.split(",") if loc.strip()]
+            elif isinstance(raw_user_locations, (list, tuple, set)):
+                raw_list = [str(loc).strip() for loc in raw_user_locations if str(loc).strip()]
 
-                    for db_loc in all_locations:
-                        db_token = _clean_token(db_loc) # e.g. "aciplkerala" or "aciplernakulam"
-                        
-                        # Partial substring check: "kerala" in "aciplkerala" OR "aciplkerala" in "kerala"
-                        if any(token in db_token or db_token in token for token in user_tokens):
-                            matched_locations.append(db_loc)
+            if raw_list:
+                matched_locations = []
+                user_tokens = [_clean_token(loc) for loc in raw_list if _clean_token(loc)]
 
-                    # Return matched dataset locations, or fallback to raw list if none match
-                    return matched_locations if matched_locations else raw_list
+                for db_loc in all_locations:
+                    db_token = _clean_token(db_loc)
+                    if any(token in db_token or db_token in token for token in user_tokens):
+                        matched_locations.append(db_loc)
 
-                return []
+                return matched_locations
+
+            return []
     except Exception as e:
-        print(f"Error fetching locations: {e}")
+        print(f"Error fetching locations for sheet '{sheet_name}': {e}")
     return []
 
 
@@ -99,13 +104,12 @@ if page == "upload":
 
     with st.container():
         col1, _ = st.columns([2, 1])
-
         with col1:
             custom_sales_file = st.file_uploader(
                 "Select Customized Sales Report File",
                 type=["xlsx", "xls"],
                 key="custom_sales_uploader",
-                help="Upload pre-processed sales figures or invoice summaries."
+                help="Upload pre-processed sales figures or invoice summaries.",
             )
 
     if st.button("🚀 Process & Sync Custom Data", type="primary", use_container_width=False):
@@ -116,6 +120,7 @@ if page == "upload":
                 success = upload_customised_report(custom_sales_file, custom_db.strip())
                 if success:
                     st.cache_data.clear()
+                    st.session_state.pop("missing_report_df", None)
                     st.success("✅ Customized sales report uploaded and synced successfully!")
 
     st.divider()
@@ -124,12 +129,11 @@ if page == "upload":
 
     with st.container():
         col1, _ = st.columns([2, 1])
-
         with col1:
             uploaded_file = st.file_uploader(
                 "Select Excel Report File",
                 type=["xlsx", "xls"],
-                help="Ensure the file contains an 'invoice_doc_date' column."
+                help="Ensure the file contains an 'invoice_doc_date' column.",
             )
 
     if st.button("🚀 Process & Upload", type="primary", use_container_width=False):
@@ -139,70 +143,121 @@ if page == "upload":
             with st.spinner("Processing file & updating database..."):
                 success = process_and_upload_excel(uploaded_file, sales_db.strip(), custom_db)
                 if success:
-                    st.cache_data.clear()  # Clear cache so dashboard displays updated data immediately
+                    st.cache_data.clear()
+                    st.session_state.pop("missing_report_df", None)
+                    st.success("✅ Sales report uploaded successfully!")
+
+    st.divider()
+
+    st.header("📤 Upload Purchase/SRT Report")
+
+    with st.container():
+        col1, _ = st.columns([2, 1])
+        with col1:
+            uploaded_purchase_file = st.file_uploader(
+                "Select Excel Report File",
+                type=["xlsx", "xls"],
+            )
+
+    if st.button("🚀 Upload Inward Report", type="primary", use_container_width=False):
+        if not uploaded_purchase_file:
+            st.warning("⚠️ Please select an Excel file before proceeding.")
+        else:
+            with st.spinner("Processing file & updating database..."):
+                success = upload_inward_data_excel(uploaded_purchase_file, purchase_db.strip())
+                if success:
+                    st.cache_data.clear()
+                    st.session_state.pop("missing_report_df", None)
+                    st.success("✅ Inward report uploaded successfully!")
+
 
 # ─────────────────────────────────────────────────────────
 # PAGE 2: Dashboard
 # ─────────────────────────────────────────────────────────
 elif page == "dashboard":
     st.title("📌 Logistics Dashboard")
+
+    # ── DASHBOARD TYPE SELECTION (Sales vs. Inward/Purchase) ──
+    dash_col, _ = st.columns([2, 2])
+    with dash_col:
+        dashboard_type = st.radio(
+            "Select Dashboard View:",
+            options=["Sales Dashboard", "Inward / Purchase Dashboard"],
+            index=0,  # Sales Dashboard selected by default
+            horizontal=True,
+            key="selected_dashboard_type",
+        )
+
+    # Determine database target sheet, mode identifier, and key column based on selection
+    if dashboard_type == "Sales Dashboard":
+        selected_db = sales_db.strip()
+        doc_id_col = "tax_invoice_no"
+        dash_mode = "sales"
+    else:
+        selected_db = purchase_db.strip()
+        doc_id_col = "grn_no"  # Purchase/Inward identifier column
+        dash_mode = "purchase"
+
+
+    # Clear prior missing data report if user switches dashboard views
+    if st.session_state.get("active_dash_type") != dashboard_type:
+        st.session_state["active_dash_type"] = dashboard_type
+        st.session_state.pop("missing_report_df", None)
+
+    st.markdown("---")
+
     # ── EXTRACT MISSING UPDATED DATA SECTION ─────────────────────────
-    with st.expander("⚠️ Extract Missing Updated Data", expanded=False):
+    with st.expander(f"⚠️ Extract Missing Updated Data ({dashboard_type})", expanded=False):
         st.caption("Find records created at least 3 days ago where editable fields remain unupdated.")
 
-        # 4 Input Columns
+        # Input Columns
         d1, d2, d3, d4 = st.columns([1.5, 1.5, 3, 2])
 
         with d1:
-            from_date = st.date_input("From Date", value=None, key="missing_from_date")
-        
-        with d2:
-            to_date = st.date_input("To Date", value=None, key="missing_to_date")
+            from_date = st.date_input("From Date", value=None, key=f"missing_from_date_{dash_mode}")
 
-        # Fetch allowed locations based on role and fuzzy matching
+        with d2:
+            to_date = st.date_input("To Date", value=None, key=f"missing_to_date_{dash_mode}")
+
+        # Fetch allowed locations for the selected target sheet
         available_locs = get_available_locations(
-            sheet_name=sales_db.strip(),
+            sheet_name=selected_db,
             user_role=role,
-            raw_user_locations=user_locs
+            raw_user_locations=user_locs,
         )
 
         with d3:
             if is_admin:
-                # ADMIN / SUPER ADMIN: Default is overall company data
                 filter_locations = st.multiselect(
                     "Select Location(s)",
                     options=available_locs,
                     default=[],
                     placeholder="All Regions / Overall Company Data",
-                    key="missing_locations_select"
+                    key=f"missing_locs_select_{dash_mode}",
                 )
             else:
-                # LOGISTICS USER: Restricted and defaulted strictly to matched assigned regions
                 filter_locations = st.multiselect(
                     "Your Assigned Region(s)",
                     options=available_locs,
                     default=available_locs,
                     placeholder="Assigned Regions Only",
-                    key="missing_locations_select"
+                    key=f"missing_locs_select_{dash_mode}",
                 )
 
         with d4:
-            st.write(" ")  # Spacing alignment
             st.write(" ")
-            run_extract = st.button("🔍 Extract Missing Data", type="primary", use_container_width=True)
+            st.write(" ")
+            run_extract = st.button("🔍 Extract Missing Data", type="primary", use_container_width=True, key=f"btn_extract_{dash_mode}")
 
         if run_extract:
             with st.spinner("Searching for pending updates..."):
-                if is_admin:
-                    query_locations = filter_locations
-                else:
-                    query_locations = filter_locations if filter_locations else available_locs
+                query_locations = filter_locations if (filter_locations or is_admin) else available_locs
 
                 missing_df = missing_updates(
                     from_date=from_date,
                     to_date=to_date,
                     filter_locations=query_locations,
-                    target_sheet_name=sales_db.strip()
+                    target_sheet_name=selected_db,
                 )
                 st.session_state["missing_report_df"] = missing_df
 
@@ -212,19 +267,21 @@ elif page == "dashboard":
 
             if not df_result.empty:
                 st.subheader(f"⚠️ Pending Records Found: {len(df_result)}")
-
                 dl_col2, _ = st.columns([1.5, 5])
 
+                # Determine dynamic column name for aggregation
+                count_col = doc_id_col if doc_id_col in df_result.columns else df_result.columns[0]
+
                 # Location Summary Table
-                summary = df_result.groupby("location_name", as_index=False).agg(
-                    Unupdated_Count=("tax_invoice_no", "count")
-                )
+                if "location_name" in df_result.columns:
+                    summary = df_result.groupby("location_name", as_index=False).agg(
+                        Unupdated_Count=(count_col, "count")
+                    )
+                else:
+                    summary = pd.DataFrame({"Total Unupdated": [len(df_result)]})
 
                 # Export to Excel
                 buffer = io.BytesIO()
-                # with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-                #     summary.to_excel(writer, index=False, sheet_name="Summary")
-                #     df_result.to_excel(writer, index=False, sheet_name="Missing Updates Data")
                 with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
                     summary.to_excel(writer, index=False, sheet_name="Summary")
                     df_result.to_excel(writer, index=False, sheet_name="Missing Updates Data")
@@ -233,14 +290,18 @@ elif page == "dashboard":
                 dl_col2.download_button(
                     label="📥 Download Excel",
                     data=excel_data,
-                    file_name=f"missing_updates_{date.today().strftime('%Y%m%d')}.xlsx",
+                    file_name=f"missing_updates_{dash_mode}_{date.today().strftime('%Y%m%d')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
+                    use_container_width=True,
+                    key=f"dl_missing_btn_{dash_mode}"
                 )
             else:
                 st.info("No unupdated records match your selected filter criteria.")
 
     st.markdown("---")
 
-    # Render Main Dashboard Data Grid
-    render_dashboard_page(sales_db)
+    # ── RENDER SPECIFIC DASHBOARD VIEW ─────────────────────────────────
+    if dash_mode == "purchase":
+        render_purchase_dashboard(purchase_db)
+    else:
+        render_sales_dashboard(sales_db)
